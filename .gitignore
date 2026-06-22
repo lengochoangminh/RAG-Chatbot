@@ -1,0 +1,30 @@
+# IDE setup
+.vscode/
+
+# Python cache
+__pycache__/
+.pytest_cache/
+.idea/
+
+# Log files
+*.log
+
+# Virtual environment
+venv/
+.env
+
+# Python compiled files
+.__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Build artifacts
+builds/
+logs/
+
+# ChromaDB generated data
+chroma_db
+
+knowledge-docs
