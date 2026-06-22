@@ -8,6 +8,30 @@ Available in two modes:
 
 ---
 
+## Problem Statement
+
+Every time a new hire joins the team, a senior engineer or team lead must invest significant time walking them through onboarding: explaining processes, pointing to the right documents, and answering the same recurring questions — often repeatedly across different hires.
+
+This creates friction for both sides:
+- **For the team**: senior members are pulled away from productive work to answer questions that are already documented somewhere.
+- **For the new hire**: finding the right information is slow and depends on who is available, leading to delays and inconsistent answers.
+
+### How this chatbot helps
+
+The RAG Chatbot gives new hires **instant, accurate, self-service access** to the team's knowledge base — no need to interrupt a colleague or manually search through Confluence pages and PDFs.
+
+| Without RAG Chatbot | With RAG Chatbot |
+|---|---|
+| Ask a senior → wait for a reply | Ask `@SonicBot` → get an answer in seconds |
+| Answer quality depends on who you ask | Answers are grounded in the official documents |
+| Same questions answered over and over | Knowledge is always available, 24/7 |
+| New hires feel unsure where to look | New hires can explore confidently on their own |
+| Must ask in the team's primary language | Ask in **any language** — the chatbot understands and replies accordingly |
+
+New hires ask questions in plain language, **in whichever language they are most comfortable with** — the chatbot automatically retrieves the most relevant content across the onboarding checklist, policy PDFs, and benefit documents, and cites the exact source so they can read further if needed.
+
+---
+
 ## Framework Overview
 
 ```
@@ -146,28 +170,9 @@ python ingest_database.py
 - **Subsequent runs**: only processes new, modified, or deleted files (incremental).
 - Re-run any time you add or update documents.
 
-### Step 2a — Terminal chatbot
-
-```bash
-python chatbot.py
-```
-
-On startup the chatbot will:
-1. Connect to ChromaDB and report the number of available chunks.
-2. Authenticate with Azure AI Foundry.
-3. Connect to the `mcp-atlassian` MCP server and fetch the configured Confluence page.
-4. Enter the interactive chat loop.
-
-#### In-chat commands
-
-| Command | Action |
-|---|---|
-| `quit` / `exit` | Exit the chatbot |
-| `clear` | Reset conversation history |
-
 ---
 
-### Step 2b — Slack bot
+### Step 2 — Slack bot
 
 ```bash
 python chatbot-v2.py
@@ -190,6 +195,47 @@ Once running, **mention `@SonicBot`** in any channel:
 > Each Slack user has their own isolated conversation history (last 10 turns). Long answers are automatically split to respect Slack's 4 000-character message limit.
 
 ---
+
+### Step 3 — Ask Questions
+
+The chatbot is grounded in the following knowledge sources:
+
+| Source | Content |
+|---|---|
+| Confluence page | New Employee Onboarding Checklist (English Version) |
+| PDF | 2026 Company Holiday Schedule |
+| PDF | 2026 Employee Benefit Packet |
+| PDF | Employee Referral Program Policy & Procedures |
+
+Ask your question naturally — the chatbot will automatically search the most relevant source(s) and cite the document name, page, or Confluence section in its answer.
+
+#### Example questions
+
+**Onboarding**
+- *"What are the steps I need to complete in my first week?"*
+- *"What IT access requests should I submit on day one?"*
+- *"Who do I contact to get my employee badge?"*
+
+**Company holidays**
+- *"What are the public holidays for 2026?"*
+- *"Is there a day off around Thanksgiving?"*
+
+**Benefits**
+- *"What health insurance plans are available?"*
+- *"How do I enroll in the 401(k) plan?"*
+- *"What is the annual leave entitlement for new employees?"*
+
+**Referral program**
+- *"How does the employee referral bonus work?"*
+- *"What is the process to refer a candidate?"*
+- *"Are there any restrictions on who I can refer?"*
+
+#### Demo
+
+<img src=".\screenshots\RAG-Demo.jpg" width="700">
+
+---
+
 
 ## Configuration
 
