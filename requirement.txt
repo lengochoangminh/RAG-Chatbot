@@ -25,3 +25,8 @@ dotenv==0.9.9
 # MCP client SDK + Atlassian MCP server
 mcp
 mcp-atlassian
+
+# Slack integration
+slack-bolt==1.28.0
+slack-sdk==3.41.0
+flask==3.1.3 

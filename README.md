@@ -2,14 +2,18 @@
 
 A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded in two knowledge sources: your own PDF documents (via ChromaDB) and a live Confluence page (via an Atlassian MCP server). It uses Azure AI Foundry (OpenAI) for response generation.
 
+Available in two modes:
+- **`chatbot.py`** — interactive terminal chatbot
+- **`chatbot-v2.py`** — Slack bot; mention `@SonicBot` in any channel to ask a question
+
 ---
 
 ## Framework Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     User Query                          │
-└────────────────────────┬────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│          User Query  (terminal input  OR  Slack @mention)    │
+└──────────────────────────────┬───────────────────────────────┘
                          │
                          ▼
              ┌───────────────────────┐
@@ -50,6 +54,9 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded i
 | Live knowledge source | Atlassian MCP server (`mcp-atlassian`) | Fetches Confluence pages at startup without manual export |
 | Tool execution | MCP tool-call loop (async) | LLM can invoke Atlassian tools and incorporate results before answering |
 | LLM | Azure AI Foundry (configurable deployment) | Grounded, no hallucination beyond provided sources |
+| Slack interface | `slack-bolt` + Socket Mode | No public URL needed; works behind firewalls |
+| Per-user history | In-memory dict (thread-safe lock) | Each Slack user gets an independent conversation context |
+| Slack message size | Chunked at 3 800 chars | Stays within Slack's 4 000-char hard limit |
 
 ---
 
@@ -57,7 +64,8 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded i
 
 ```
 RAG-Chatbot/
-├── chatbot.py              # Interactive chat loop (main entry point)
+├── chatbot.py              # Interactive terminal chatbot
+├── chatbot-v2.py           # Slack bot (Socket Mode)
 ├── ingest_database.py      # PDF ingestion pipeline → ChromaDB
 ├── requirement.txt         # Python dependencies
 ├── .env                    # Environment variables (not committed)
@@ -78,6 +86,7 @@ RAG-Chatbot/
 - PDF documents to query placed under `knowledge-docs/`
 - A Confluence (Server/Data Center) instance accessible via a personal access token
 - `mcp-atlassian` CLI installed and available on `PATH` (see [sooperset/mcp-atlassian](https://github.com/sooperset/mcp-atlassian))
+- _(Slack bot only)_ A Slack app with **Socket Mode** enabled, the `app_mentions:read` and `chat:write` scopes, and both a Bot User OAuth Token (`xoxb-…`) and an App-Level Token (`xapp-…`)
 
 ---
 
@@ -113,6 +122,10 @@ CONFLUENCE_TOKEN=<your-confluence-personal-access-token>
 # Jira (optional — required only if using Jira MCP tools)
 JIRA_BASE_URL=https://jira.example.com
 JIRA_TOKEN=<your-jira-personal-access-token>
+
+# Slack bot (chatbot-v2.py only)
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
 ```
 
 Azure authentication uses `DefaultAzureCredential`. Run `az login` (Azure CLI) before starting the chatbot if you are not running inside a managed-identity environment.
@@ -133,7 +146,7 @@ python ingest_database.py
 - **Subsequent runs**: only processes new, modified, or deleted files (incremental).
 - Re-run any time you add or update documents.
 
-### Step 2 — Start the chatbot
+### Step 2a — Terminal chatbot
 
 ```bash
 python chatbot.py
@@ -154,19 +167,44 @@ On startup the chatbot will:
 
 ---
 
+### Step 2b — Slack bot
+
+```bash
+python chatbot-v2.py
+```
+
+On startup the bot will:
+1. Connect to ChromaDB.
+2. Authenticate with Azure AI Foundry.
+3. Pre-fetch the Confluence page via `mcp-atlassian`.
+4. Connect to Slack via **Socket Mode** (no public URL required).
+
+Once running, **mention `@SonicBot`** in any channel:
+
+| Slack message | Action |
+|---|---|
+| `@SonicBot <your question>` | Answer from ChromaDB + Confluence |
+| `@SonicBot clear history` | Reset your personal conversation history |
+| `@SonicBot help` | Show available commands |
+
+> Each Slack user has their own isolated conversation history (last 10 turns). Long answers are automatically split to respect Slack's 4 000-character message limit.
+
+---
+
 ## Configuration
 
 Key constants at the top of each script can be adjusted:
 
 | File | Constant | Default | Description |
 |---|---|---|---|
-| `chatbot.py` | `TOP_K` | `5` | Number of chunks retrieved per query |
-| `chatbot.py` | `SIMILARITY_THRESHOLD` | `0.3` | Minimum cosine similarity to consider relevant |
-| `chatbot.py` | `ONBOARDING_PAGE_ID` | `128180006` | Confluence page ID to fetch at startup |
-| `chatbot.py` | `ONBOARDING_PAGE_TITLE` | _(see file)_ | Display name for the Confluence source |
+| `chatbot.py` / `chatbot-v2.py` | `TOP_K` | `5` | Number of chunks retrieved per query |
+| `chatbot.py` / `chatbot-v2.py` | `SIMILARITY_THRESHOLD` | `0.3` | Minimum cosine similarity to consider relevant |
+| `chatbot.py` / `chatbot-v2.py` | `ONBOARDING_PAGE_ID` | `128180006` | Confluence page ID to fetch at startup |
+| `chatbot.py` / `chatbot-v2.py` | `ONBOARDING_PAGE_TITLE` | _(see file)_ | Display name for the Confluence source |
+| `chatbot-v2.py` | `MAX_HISTORY_TURNS` | `10` | Per-user turns kept in memory (each turn = 2 messages) |
 | `ingest_database.py` | `CHUNK_SIZE` | `500` | Characters per chunk |
 | `ingest_database.py` | `CHUNK_OVERLAP` | `100` | Overlap between consecutive chunks |
-| Both | `COLLECTION_NAME` | `knowledge_base` | Must match between both scripts |
+| All | `COLLECTION_NAME` | `knowledge_base` | Must match across all scripts |
 
 ---
 
@@ -180,4 +218,6 @@ Key constants at the top of each script can be adjusted:
 | `azure-ai-projects` / `azure-identity` | Azure AI Foundry client & auth |
 | `mcp` | Model Context Protocol client SDK |
 | `mcp-atlassian` | MCP server that wraps Confluence & Jira APIs |
+| `slack-bolt` | Slack app framework (event handling, Socket Mode) |
+| `slack-sdk` | Slack Web API client (posting messages) |
 | `python-dotenv` | `.env` file loading |
