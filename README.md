@@ -1,6 +1,6 @@
 # RAG Chatbot — Personal Assistant
 
-A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded in your own PDF documents. It combines a local ChromaDB vector store for semantic retrieval with Azure AI Foundry (OpenAI) for response generation.
+A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded in two knowledge sources: your own PDF documents (via ChromaDB) and a live Confluence page (via an Atlassian MCP server). It uses Azure AI Foundry (OpenAI) for response generation.
 
 ---
 
@@ -13,27 +13,30 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded i
                          │
                          ▼
              ┌───────────────────────┐
-             │  Query Reformulation  │  (LLM fixes typos, resolves
-             │  (Azure AI Foundry)   │   follow-ups from history)
+             │  Query Reformulation  │  LLM fixes typos, resolves
+             │  (Azure AI Foundry)   │  follow-ups from chat history
              └───────────┬───────────┘
                          │
-                         ▼
-             ┌───────────────────────┐
-             │   ChromaDB Retrieval  │  Top-K cosine-similarity search
-             │  (all-MiniLM-L6-v2)   │  over ingested PDF chunks
-             └───────────┬───────────┘
-                         │
-                         ▼
-             ┌───────────────────────┐
-             │  Prompt Augmentation  │  System prompt + retrieved
-             │                       │  excerpts + chat history
-             └───────────┬───────────┘
-                         │
-                         ▼
-             ┌───────────────────────┐
-             │  Response Generation  │  Azure AI Foundry LLM
-             │  (Azure AI Foundry)   │  answers strictly from context
-             └───────────────────────┘
+              ┌──────────┴──────────┐
+              ▼                     ▼
+  ┌─────────────────────┐  ┌──────────────────────┐
+  │  ChromaDB Retrieval │  │  Confluence Page     │
+  │  (PDF chunks,       │  │  (fetched live via   │
+  │  all-MiniLM-L6-v2)  │  │  MCP Atlassian)      │
+  └──────────┬──────────┘  └──────────┬───────────┘
+             │                        │
+             └──────────┬─────────────┘
+                        ▼
+            ┌───────────────────────┐
+            │  Prompt Augmentation  │  System prompt + both sources
+            │                       │  + chat history (last 20 turns)
+            └───────────┬───────────┘
+                        │
+                        ▼
+            ┌───────────────────────┐
+            │  Response Generation  │  LLM tool-call loop; cites
+            │  (Azure AI Foundry)   │  section or document + page
+            └───────────────────────┘
 ```
 
 ### Key design decisions
@@ -44,7 +47,9 @@ A Retrieval-Augmented Generation (RAG) chatbot that answers questions grounded i
 | Embedding model | `all-MiniLM-L6-v2` (via ChromaDB built-in) | Same model at ingest & query time — no mismatch |
 | Chunking | `RecursiveCharacterTextSplitter` (500 / 100 overlap) | Balances context per chunk vs. retrieval precision |
 | Change detection | SHA-256 file hash | Reliable incremental re-ingestion on file edits |
-| LLM | Azure AI Foundry (configurable deployment) | Grounded, no hallucination beyond provided excerpts |
+| Live knowledge source | Atlassian MCP server (`mcp-atlassian`) | Fetches Confluence pages at startup without manual export |
+| Tool execution | MCP tool-call loop (async) | LLM can invoke Atlassian tools and incorporate results before answering |
+| LLM | Azure AI Foundry (configurable deployment) | Grounded, no hallucination beyond provided sources |
 
 ---
 
@@ -71,6 +76,8 @@ RAG-Chatbot/
 - Python 3.10+
 - An **Azure AI Foundry** project with a deployed chat model
 - PDF documents to query placed under `knowledge-docs/`
+- A Confluence (Server/Data Center) instance accessible via a personal access token
+- `mcp-atlassian` CLI installed and available on `PATH` (see [sooperset/mcp-atlassian](https://github.com/sooperset/mcp-atlassian))
 
 ---
 
@@ -95,8 +102,17 @@ pip install -r requirement.txt
 Create a `.env` file in the project root:
 
 ```env
+# Azure AI Foundry
 AZURE_PROJECT_ENDPOINT=https://<your-hub>.services.ai.azure.com/api/projects/<your-project>
 MODEL_DEPLOYMENT_NAME=<your-model-deployment-name>
+
+# Confluence (Server / Data Center)
+CONFLUENCE_BASE_URL=https://confluence.example.com
+CONFLUENCE_TOKEN=<your-confluence-personal-access-token>
+
+# Jira (optional — required only if using Jira MCP tools)
+JIRA_BASE_URL=https://jira.example.com
+JIRA_TOKEN=<your-jira-personal-access-token>
 ```
 
 Azure authentication uses `DefaultAzureCredential`. Run `az login` (Azure CLI) before starting the chatbot if you are not running inside a managed-identity environment.
@@ -123,6 +139,12 @@ python ingest_database.py
 python chatbot.py
 ```
 
+On startup the chatbot will:
+1. Connect to ChromaDB and report the number of available chunks.
+2. Authenticate with Azure AI Foundry.
+3. Connect to the `mcp-atlassian` MCP server and fetch the configured Confluence page.
+4. Enter the interactive chat loop.
+
 #### In-chat commands
 
 | Command | Action |
@@ -140,6 +162,22 @@ Key constants at the top of each script can be adjusted:
 |---|---|---|---|
 | `chatbot.py` | `TOP_K` | `5` | Number of chunks retrieved per query |
 | `chatbot.py` | `SIMILARITY_THRESHOLD` | `0.3` | Minimum cosine similarity to consider relevant |
+| `chatbot.py` | `ONBOARDING_PAGE_ID` | `128180006` | Confluence page ID to fetch at startup |
+| `chatbot.py` | `ONBOARDING_PAGE_TITLE` | _(see file)_ | Display name for the Confluence source |
 | `ingest_database.py` | `CHUNK_SIZE` | `500` | Characters per chunk |
 | `ingest_database.py` | `CHUNK_OVERLAP` | `100` | Overlap between consecutive chunks |
 | Both | `COLLECTION_NAME` | `knowledge_base` | Must match between both scripts |
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `chromadb` | Local vector store with built-in embedding |
+| `pypdf` | PDF text extraction |
+| `langchain-text-splitters` | Recursive chunking |
+| `azure-ai-projects` / `azure-identity` | Azure AI Foundry client & auth |
+| `mcp` | Model Context Protocol client SDK |
+| `mcp-atlassian` | MCP server that wraps Confluence & Jira APIs |
+| `python-dotenv` | `.env` file loading |

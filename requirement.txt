@@ -21,3 +21,7 @@ python-dotenv
 azure-identity
 azure-ai-projects
 dotenv==0.9.9
+
+# MCP client SDK + Atlassian MCP server
+mcp
+mcp-atlassian
